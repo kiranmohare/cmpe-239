@@ -8,7 +8,7 @@ public class JobsBundle implements Bundle {
 
 	private String scanURL = null;
 	
-    
+    @Override
     public void initialize(Bootstrap<?> bootstrap) {
     }
     
@@ -19,7 +19,7 @@ public class JobsBundle implements Bundle {
     	this.scanURL = scanURL;
     }
 
-    
+    @Override
     public void run(Environment environment) {
     	environment.manage(new JobManager(scanURL));
     }

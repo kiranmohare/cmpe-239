@@ -31,7 +31,7 @@ public class JobManager implements Managed {
     	reflections = new Reflections(scanUrl);
     }
     
-    
+    @Override
     public void start() throws Exception {
         scheduler = StdSchedulerFactory.getDefaultScheduler();
         scheduler.start();
@@ -41,7 +41,7 @@ public class JobManager implements Managed {
         scheduleAllJobsWithOnAnnotation();
     }
 
-    
+    @Override
     public void stop() throws Exception {
         scheduleAllJobsOnApplicationStop();
 
@@ -49,7 +49,7 @@ public class JobManager implements Managed {
         // anyone got a better solution?
         Thread.sleep(100);
 
-      //  scheduler.shutdown(true);
+        scheduler.shutdown(true);
     }
 
     private void scheduleAllJobsOnApplicationStop() throws SchedulerException {
