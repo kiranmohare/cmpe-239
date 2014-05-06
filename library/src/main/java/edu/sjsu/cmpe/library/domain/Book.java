@@ -7,7 +7,6 @@ import javax.validation.constraints.NotNull;
 import org.hibernate.validator.constraints.NotEmpty;
 
 public class Book {
-	private boolean isLost = false;
 
     public enum Status {
 	available("available"), checkedout("checkedout"), lost("lost");
@@ -128,17 +127,12 @@ public class Book {
     public void setStatus(Status status) {
 	this.status = status;
     }
-    
-    public boolean isLost() {
-		return isLost;
+
+	@Override
+	public String toString() {
+		return "Book [isbn=" + isbn + ", title=" + title + ", category="
+				+ category + ", coverimage=" + coverimage + ", status="
+				+ status + "]";
 	}
-	/**
-	 * @param status the isLost to set
-	 */
-	public void setLost(Status status) {
-		if (status.equals(Status.lost))
-			this.isLost = true;
-		else
-			this.isLost = false;
-	}
+
 }

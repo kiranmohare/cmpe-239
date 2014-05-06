@@ -1,8 +1,15 @@
 package edu.sjsu.cmpe.library.repository;
 
 import static com.google.common.base.Preconditions.checkArgument;
-
 import static com.google.common.base.Preconditions.checkNotNull;
+
+
+
+
+
+
+
+
 
 import java.net.MalformedURLException;
 import java.net.URL;
@@ -21,230 +28,164 @@ import javax.jms.TextMessage;
 
 import org.fusesource.stomp.jms.StompJmsConnectionFactory;
 import org.fusesource.stomp.jms.StompJmsDestination;
+import org.fusesource.stomp.jms.message.StompJmsMessage;
+
 import edu.sjsu.cmpe.library.config.LibraryServiceConfiguration;
 import edu.sjsu.cmpe.library.domain.Book;
 import edu.sjsu.cmpe.library.domain.Book.Status;
+import edu.sjsu.cmpe.library.msg.Producer;
 
 public class BookRepository implements BookRepositoryInterface {
+    /** In-memory map to store books. (Key, Value) -> (ISBN, Book) */
+    private final ConcurrentHashMap<Long, Book> bookInMemoryMap;
+    private final LibraryServiceConfiguration configuration;
 
-	/** In-memory map to store books. (Key, Value) -> (ISBN, Book) */
-	private final ConcurrentHashMap<Long, Book> bookInMemoryMap;
-	LibraryServiceConfiguration config;
-	/** Never access this key directly; instead use generateISBNKey() */
-	private long isbnKey;
-	ArrayList<String> receivedBooks = new ArrayList<String>();
+    /** Never access this key directly; instead use generateISBNKey() */
+    private long isbnKey;
+	private String apolloUser;
+	private String apolloPassword;
+	private String apolloHost;
+	private int apolloPort;
+	private String stompQueue;
+	private String stompTopic;
+	private final Producer producer;
 
-	public BookRepository(LibraryServiceConfiguration configuration)
-			throws JMSException, MalformedURLException {
-		isbnKey = 0;
-		bookInMemoryMap = seedData();
-		config = configuration;
-		
+    public BookRepository(LibraryServiceConfiguration config) {
+	bookInMemoryMap = seedData();
+	this.configuration = config;
+	System.out.println("checkpoint");
+	this.producer = new Producer(config);
+	apolloUser = configuration.getApolloUser();
+	apolloPassword = configuration.getApolloPassword();
+	apolloHost = configuration.getApolloHost();
+	apolloPort = configuration.getApolloPort();
+	stompQueue = configuration.getStompQueueName();
+	stompTopic = configuration.getStompTopicName();
+	System.out.println(apolloUser);
+	/*try {
+		listener();
+	} catch (JMSException e) {
+		// TODO Auto-generated catch block
+		e.printStackTrace();
+	}*/
+
+
+	isbnKey = 2;
+    }
+
+    private ConcurrentHashMap<Long, Book> seedData(){
+	ConcurrentHashMap<Long, Book> bookMap = new ConcurrentHashMap<Long, Book>();
+	Book book = new Book();
+	book.setIsbn(1);
+	book.setCategory("computer");
+	book.setTitle("Java Concurrency in Practice");
+	try {
+	    book.setCoverimage(new URL("http://goo.gl/N96GJN"));
+	} catch (MalformedURLException e) {
+	    // eat the exception
 	}
+	bookMap.put(book.getIsbn(), book);
 
-	private ConcurrentHashMap<Long, Book> seedData() {
-		ConcurrentHashMap<Long, Book> bookMap = new ConcurrentHashMap<Long, Book>();
-		Book book = new Book();
-		book.setIsbn(1);
-		book.setCategory("computer");
-		book.setTitle("Java Concurrency in Practice");
-		try {
-			book.setCoverimage(new URL("http://goo.gl/N96GJN"));
-		} catch (MalformedURLException e) {
-		}
-		bookMap.put(book.getIsbn(), book);
-
-		book = new Book();
-		book.setIsbn(2);
-		book.setCategory("computer");
-		book.setTitle("Restful Web Services");
-		try {
-			book.setCoverimage(new URL("http://goo.gl/ZGmzoJ"));
-		} catch (MalformedURLException e) {
-		}
-		bookMap.put(book.getIsbn(), book);
-
-		return bookMap;
+	book = new Book();
+	book.setIsbn(2);
+	book.setCategory("computer");
+	book.setTitle("Restful Web Services");
+	try {
+	    book.setCoverimage(new URL("http://goo.gl/ZGmzoJ"));
+	} catch (MalformedURLException e) {
+	    // eat the exception
 	}
+	bookMap.put(book.getIsbn(), book);
 
-	/**
-	 * This should be called if and only if you are adding new books to the
-	 * repository.
-	 * 
-	 * @return a new incremental ISBN number
-	 */
-	private final Long generateISBNKey() {
-		// increment existing isbnKey and return the new value
-		return Long.valueOf(++isbnKey);
-	}
+	return bookMap;
+    }
 
-	/**
-	 * Method to generate the new book
-	 */
-	@Override
-	public Book saveBook(Book newBook) {
-		checkNotNull(newBook, "newBook instance must not be null");
-		// the new book should not be null and we r generating new book here
-		Long isbn = generateISBNKey();
-		newBook.setIsbn(isbn);
-		// TODO: Attach other fields
+    /**
+     * This should be called if and only if you are adding new books to the
+     * repository.
+     * 
+     * @return a new incremental ISBN number
+     */
+    private final Long generateISBNKey() {
+	// increment existing isbnKey and return the new value
+	return Long.valueOf(++isbnKey);
+    }
 
-		// get book at end
-		bookInMemoryMap.putIfAbsent(isbn, newBook);
+    /**
+     * This will auto-generate unique ISBN for new books.
+     */
+    @Override
+    public Book saveBook(Book newBook) {
+	checkNotNull(newBook, "newBook instance must not be null");
+	// Generate new ISBN
+	Long isbn = generateISBNKey();
+	newBook.setIsbn(isbn);
+	// TODO: create and associate other fields such as author
 
-		return newBook;
-	}
+	// Finally, save the new book into the map
+	bookInMemoryMap.putIfAbsent(isbn, newBook);
 
-	/**
-	 * @see edu.sjsu.cmpe.library.repository.BookRepositoryInterface#getBookByISBN(java.lang.Long)
-	 */
-	@Override
-	public Book getBookByISBN(Long isbn) {
-		checkArgument(isbn > 0,
-				"ISBN was %s but expected greater than zero value", isbn);
-		if(bookInMemoryMap.get(isbn) != null){
+	return newBook;
+    }
+
+    /**
+     * @see edu.sjsu.cmpe.library.repository.BookRepositoryInterface#getBookByISBN(java.lang.Long)
+     */
+    @Override
+    public Book getBookByISBN(Long isbn) {
+	checkArgument(isbn > 0,
+		"ISBN was %s but expected greater than zero value", isbn);
+	if(bookInMemoryMap.containsKey(isbn)) {
+		//System.out.println("returning book..");
 		return bookInMemoryMap.get(isbn);
-		}
-	else{
-			Book book=new Book();
-			return book;
-			}
 	}
-
-	@Override
-	public List<Book> getAllBooks() {
-		System.out.println("Returning all books from book Repo" +bookInMemoryMap.values());
-		return new ArrayList<Book>(bookInMemoryMap.values());
-	}
-
-	/*
-	 * Delete a book from the map by the isbn. If the given ISBN was invalid, do
-	 * nothing.
-	 * 
-	 * @see
-	 * edu.sjsu.cmpe.library.repository.BookRepositoryInterface#delete(java.
-	 * lang.Long)
-	 */
-	@Override
-	public void delete(Long isbn) {
-		bookInMemoryMap.remove(isbn);
-	}
-
-	public Book update(Long isbn, Status newStatus) throws JMSException {
-		Book book = bookInMemoryMap.get(isbn);
-		book.setStatus(newStatus);
-		if (config.getStompTopicName().equals("/topic/79209.book.all")) {
-			 callProducer("library-a:"+isbn);
-			 
-			 
-		} else {
-			 callProducer("library-b:"+isbn);
-		}
+	else {
+		//System.out.println("returning null");
+		Book book = new Book();
 		return book;
 	}
+    }
 
-	private static String env(String key, String defaultValue) {
-		String rc = System.getenv(key);
-		if (rc == null) {
-			return defaultValue;
-		}
-		return rc;
-	}
+    @Override
+    public List<Book> getAllBooks() {
+	return new ArrayList<Book>(bookInMemoryMap.values());
+    }
 
-	public void callProducer(String name) throws JMSException {
-		System.out.println("in callProducer " + config.getApolloUser());
-		String user = env1("APOLLO_USER", config.getApolloUser());
-		String password = env1("APOLLO_PASSWORD", config.getApolloPassword());
-		String host = env1("APOLLO_HOST", config.getApolloHost());
-		int port = config.getApolloPort();
-		StompJmsConnectionFactory factory = new StompJmsConnectionFactory();
-		factory.setBrokerURI("tcp://" + host + ":" + port);
-		Connection connection = factory.createConnection(user, password);
-		connection.start();
-		Session session = connection.createSession(false,
-				Session.AUTO_ACKNOWLEDGE);
-		Destination dest = new StompJmsDestination(config.getStompQueueName());// destination);
-		MessageProducer producer = session.createProducer(dest);
-		TextMessage msg = session.createTextMessage(name);
-		System.out.println("Sending msg to " + config.getStompQueueName()+ "...");
+    /*
+     * Delete a book from the map by the isbn. If the given ISBN was invalid, do
+     * nothing.
+     * 
+     * @see
+     * edu.sjsu.cmpe.library.repository.BookRepositoryInterface#delete(java.
+     * lang.Long)
+     */
+    @Override
+    public void delete(Long isbn) {
+	bookInMemoryMap.remove(isbn);
+    }
+    
+    public void addBook(Book tempBook) {
+    	checkNotNull(tempBook, "newBook instance must not be null");
+    	System.out.println(tempBook.getTitle());
+    	bookInMemoryMap.put(tempBook.getIsbn(), tempBook);
+    }
+    
+    @Override
+    	public Book updateBookStatus(Book book, Status tempStatus) throws JMSException{
+   		book.setStatus(tempStatus); 
+   		//System.out.println("checkpint2");
+   		String libname;
+   		if(configuration.getStompTopicName().equals("/topic/05452.book.all"))
+   			libname = "library-a";
+   		else
+   			libname = "library-b";
+   		producer.producer(libname+":"+book.getIsbn());
+   		//System.out.println("checkpint3");
+    	return book;
+    }
+    
 
-		producer.send(msg);
-		connection.close();
 
-	}
 
-	private static String env1(String key, String defaultValue) {
-		String rc = System.getenv(key);
-		if (rc == null) {
-			return defaultValue;
-		}
-		return rc;
-	}
 
-	public void listener() throws JMSException, MalformedURLException {
-		long isbn;
-		String bootTitle;
-		String bookCategory;
-		URL webUrl;
-		Book receivedBookItems;
-		String user = env("APOLLO_USER", "admin");
-		String password = env("APOLLO_PASSWORD", "password");
-		String host = env("APOLLO_HOST", "54.215.133.131");
-		int port = Integer.parseInt(env("APOLLO_PORT", "61613"));
-		StompJmsConnectionFactory factory = new StompJmsConnectionFactory();
-		factory.setBrokerURI("tcp://" + host + ":" + port);
-		while (true) {
-
-			Connection connection = factory.createConnection(user, password);
-			connection.start();
-			Session session = connection.createSession(false,
-					Session.AUTO_ACKNOWLEDGE);
-			Destination dest = new StompJmsDestination(
-					config.getStompTopicName());
-
-			MessageConsumer consumer = session.createConsumer(dest);
-			System.currentTimeMillis();
-			// System.out.println("Waiting for messages.....");
-			while (true) {
-				Message msg = consumer.receive(500);
-				if (msg == null)
-					break;
-				if (msg instanceof TextMessage) {
-					String body = ((TextMessage) msg).getText();
-					System.out.println("Received message =  " + body);
-					receivedBooks.add(body);
-					System.out.println("check received books "+receivedBooks);
-
-				} else {
-					System.out.println("unexpected msg " + msg.getClass());
-				}
-			}
-			connection.close();
-			for (String books : receivedBooks) {
-				isbn = Long.parseLong(books.split(":\"")[0]);
-				bootTitle = books.split(":\"")[1].replaceAll("^\"|\"$", "");
-				bookCategory = books.split(":\"")[2].replaceAll("^\"|\"$", "");
-				String str = books.split(":\"")[3];
-				receivedBookItems = getBookByISBN(isbn);
-				if (receivedBookItems.getStatus().equals(Status.lost)) {
-					receivedBookItems.setStatus(Status.available);
-				} else if (receivedBookItems.getIsbn() != isbn) {
-					receivedBookItems.setIsbn(isbn);
-					receivedBookItems.setCategory(bookCategory);
-					receivedBookItems.setStatus(Status.available);
-					receivedBookItems.setTitle(bootTitle);
-					System.out.println("new book received is  "
-							+ receivedBookItems.toString());
-				}
-			}
-		}
-	}
-
-	@Override
-	public void add(Book newbook) {
-		bookInMemoryMap.put(newbook.getIsbn(), newbook);
-		System.out.println("added new book in add method "+newbook.getTitle());
-		System.out.println(" "+bookInMemoryMap.values());
-	}
 }
-
